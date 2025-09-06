@@ -28,42 +28,115 @@ export const aiService = {
       });
 
       if (!response.ok) {
-        throw new Error(`API request failed: ${response.status}`);
+        const errorText = await response.text();
+        console.error('API Error:', response.status, errorText);
+        throw new Error(`API request failed: ${response.status} - ${errorText}`);
       }
 
       const data = await response.json();
-      return data.choices[0]?.message?.content || 'Sorry, I could not generate a response.';
+      
+      if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+        console.error('Invalid API response:', data);
+        throw new Error('Invalid response format from API');
+      }
+
+      return data.choices[0].message.content || 'Sorry, I could not generate a response.';
     } catch (error) {
       console.error('AI service error:', error);
-      return 'Sorry, there was an error connecting to the AI service. Please try again later.';
+      
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        return 'Network error: Please check your internet connection and try again.';
+      }
+      
+      if (error instanceof Error && error.message.includes('401')) {
+        return 'Authentication error: Please check the API key configuration.';
+      }
+      
+      if (error instanceof Error && error.message.includes('429')) {
+        return 'Rate limit exceeded: Please wait a moment and try again.';
+      }
+      
+      return `Error: ${error instanceof Error ? error.message : 'Unknown error occurred'}`;
     }
   },
 
   async generateNoteFromPrompt(prompt: string): Promise<{ title: string; tasks: string[] }> {
-    const response = await this.generateResponse(
-      `Create a detailed checklist for: ${prompt}. Provide a clear title and list each step as a separate task.`
-    );
+    try {
+      const response = await this.generateResponse(
+        `Create a detailed checklist for: ${prompt}. 
 
-    const lines = response.split('\n').filter(line => line.trim());
-    const title = this.extractTitle(prompt, lines[0]);
-    const tasks = lines
-      .slice(1)
-      .filter(line => line.trim())
-      .map(line => line.replace(/^[-*•]\s*/, '').trim())
-      .filter(task => task.length > 0);
+Instructions:
+1. First line should be a clear title (without "Title:" prefix)
+2. Then list each step as a separate task
+3. Each task should be actionable and specific
+4. Use simple language
+5. Maximum 10 tasks
 
-    return { title, tasks };
+Format:
+Title Here
+- Task 1
+- Task 2
+- Task 3`
+      );
+
+      const lines = response.split('\n').filter(line => line.trim());
+      
+      if (lines.length === 0) {
+        throw new Error('Empty response from AI');
+      }
+
+      // First non-empty line is the title
+      const title = this.extractTitle(prompt, lines[0]);
+      
+      // Remaining lines are tasks
+      const tasks = lines
+        .slice(1)
+        .filter(line => line.trim())
+        .map(line => line.replace(/^[-*•]\s*/, '').trim())
+        .filter(task => task.length > 0 && task.length < 200); // Reasonable task length
+
+      // If no tasks found, create a basic one
+      if (tasks.length === 0) {
+        tasks.push('Complete the task');
+      }
+
+      return { title, tasks };
+    } catch (error) {
+      console.error('Error generating note:', error);
+      
+      // Fallback response
+      return {
+        title: this.extractTitle(prompt, ''),
+        tasks: ['Complete this task', 'Review and finalize']
+      };
+    }
   },
 
   extractTitle(prompt: string, firstLine: string): string {
-    // Try to extract a clean title from the prompt or response
-    const cleanPrompt = prompt.replace(/create|make|give me|help with/gi, '').trim();
+    // Clean the first line if it exists
+    if (firstLine && firstLine.trim()) {
+      const cleanFirstLine = firstLine
+        .replace(/^#+\s*/, '') // Remove markdown headers
+        .replace(/^title:\s*/i, '') // Remove "Title:" prefix
+        .replace(/^[-*•]\s*/, '') // Remove list markers
+        .trim();
+      
+      if (cleanFirstLine.length > 0 && cleanFirstLine.length < 100) {
+        return cleanFirstLine;
+      }
+    }
+    
+    // Extract from prompt as fallback
+    const cleanPrompt = prompt
+      .replace(/create|make|give me|help with|show me/gi, '')
+      .replace(/checklist|steps|routine|guide|todo|tasks|plan/gi, '')
+      .trim();
+    
     if (cleanPrompt.length > 0 && cleanPrompt.length < 50) {
       return cleanPrompt.charAt(0).toUpperCase() + cleanPrompt.slice(1);
     }
     
-    // Fallback to first line of response
-    const cleanFirstLine = firstLine.replace(/^#+\s*/, '').trim();
-    return cleanFirstLine || 'AI Generated Checklist';
+    // Final fallback
+    return 'AI Generated Checklist';
   }
 };

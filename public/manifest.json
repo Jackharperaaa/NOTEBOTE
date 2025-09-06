@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "BOLT NOTES - Smart Note Taking",
+  "name": "BOLT NOTES",
   "version": "1.0.0",
-  "description": "AI-powered minimalist note-taking extension with intelligent checklist generation",
+  "description": "AI-powered note-taking extension with intelligent checklist generation",
   "permissions": [
     "storage"
   ],
